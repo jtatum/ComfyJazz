@@ -1,28 +1,42 @@
 **ComfyJazz** Play easy-listening comfy computer-generated Twitch-integrated Jazz music!
 
 # ComfyJazz
-The Comfiest Computer-Generated Twitch-Integrated Jazz Music! We built this Jazz music Overlay live on Twitch for the Coding Cafe! Notes are played along randomly and for each chat message on your channel!
+The Comfiest Computer-Generated Twitch-Integrated Jazz Music!
 
-This project is based on [Google's Launch Night In](https://launchnightin.withgoogle.com/en/) music toy during the countdown of the announcement!
+This is a fork of [Instafluff's ComfyJazz](https://github.com/instafluff/ComfyJazz). Notes are played randomly and for each chat message on your channel!
 
-## Instafluff ##
-> *Like these projects? The best way to support my open-source projects is by becoming a Comfy Sponsor on GitHub!*
-
-> https://github.com/sponsors/instafluff
-
-> *Come and hang out with us at the Comfiest Corner on Twitch!*
-
-> https://twitch.tv/instafluff
+Based on [Google's Launch Night In](https://launchnightin.withgoogle.com/en/) music toy.
 
 ## Instructions ##
 
 Add this as a Browser Source and replace `yourchannel` with your Twitch username!
 
-[https://www.instafluff.tv/ComfyJazz?channel=yourchannel](https://www.instafluff.tv/ComfyJazz?channel=yourchannel)
+[https://jtatum.github.io/ComfyJazz/?channel=yourchannel](https://jtatum.github.io/ComfyJazz/?channel=yourchannel)
 
 ```
 For example:
-https://www.instafluff.tv/ComfyJazz?channel=instafluff
+https://jtatum.github.io/ComfyJazz/?channel=julieee22
+```
+
+### URL Parameters ###
+
+- `channel` - Twitch channel to connect to (plays notes on chat messages)
+- `instrument` - Instrument to use: piano, sax, clarinet, vibraphone, harp, guitar, guzheng, twinkle (default: piano)
+- `volume` - Volume level from 0 to 1 (default: 1)
+- `autostart` - Set to `true` to start automatically (recommended for OBS browser sources)
+
+### OBS Setup ###
+
+Add as a Browser Source with `autostart=true`:
+```
+https://jtatum.github.io/ComfyJazz/?channel=yourchannel&autostart=true
+```
+
+If audio doesn't start, right-click the source → "Interact" → click anywhere to start.
+
+You can combine parameters:
+```
+https://jtatum.github.io/ComfyJazz/?channel=julieee22&instrument=vibraphone&volume=0.5
 ```
 
 ## Credits ##
