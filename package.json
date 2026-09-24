@@ -29,6 +29,6 @@
   "dependencies": {
     "comfy.js": "1.1.29",
     "howler": "2.2.0",
-    "webwebweb": "^1.4.0"
+    "webwebweb": "^1.6.1"
   }
 }
