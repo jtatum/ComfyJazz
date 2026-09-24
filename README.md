@@ -40,6 +40,15 @@ You can combine parameters:
 https://jtatum.github.io/ComfyJazz/?channel=julieee22&instrument=vibraphone&volume=0.5
 ```
 
+## Running Locally ##
+
+```
+npm install
+node index.js
+```
+
+Then open [http://localhost:8901](http://localhost:8901). `npm install` also copies the Howler and comfy.js libraries the page loads into `web/vendor/`, so run it again after pulling library updates.
+
 ## Credits ##
 Thank you too all the participants of this project!
 

@@ -4,6 +4,7 @@
   "description": "Comfiest Computer-Generated Twitch-Integrate Jazz Music!",
   "main": "index.js",
   "scripts": {
+    "postinstall": "node copy-libraries.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -26,6 +27,8 @@
   },
   "homepage": "https://github.com/instafluff/ComfyJazz#readme",
   "dependencies": {
+    "comfy.js": "1.1.29",
+    "howler": "2.2.0",
     "webwebweb": "^1.4.0"
   }
 }
