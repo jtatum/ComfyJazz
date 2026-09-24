@@ -50,6 +50,7 @@
 	const params = new URLSearchParams(location.search);
 
 	const instrument = params.get("instrument");
+	const song = params.get("song");
 	const volume = params.get("volume");
 	const autostart = params.get("autostart") === "true";
 
@@ -57,6 +58,7 @@
 	const comfyJazz = ComfyJazz({
 		autoNotesChance:0.3,
 		instrument: instrument || "piano",
+		song: song || "comfy",
 		volume: volume || 1
 	});
 

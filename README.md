@@ -22,6 +22,7 @@ https://jtatum.github.io/ComfyJazz/?channel=julieee22
 
 - `channel` - Twitch channel to connect to (plays notes on chat messages)
 - `instrument` - Instrument to use: piano, sax, clarinet, vibraphone, harp, guitar, guzheng, twinkle (default: piano)
+- `song` - Background song to play: comfy (default: comfy)
 - `volume` - Volume level from 0 to 1 (default: 1)
 - `autostart` - Set to `true` to start automatically (recommended for OBS browser sources)
 
