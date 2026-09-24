@@ -24,7 +24,8 @@ const ComfyJazz = (options = {}) => {
       cj.backgroundSound.volume(vol);
     }
       if( cj.lastSound ) {
-      cj.lastSound.volume(vol);
+      //just the last note, not every note sharing its sample (most of those have faded out already)
+      cj.lastSound.volume(vol, lastSoundId);
     }
 
   };
@@ -137,19 +138,31 @@ const ComfyJazz = (options = {}) => {
     return elapsed % duration;
   }
 
+  //One Howl per sample, reused for every note. Howler recycles each Howl's finished sounds, so this
+  //stays small, where a new Howl per note piled up forever (and unloading them throws away the
+  //decoded sample, so it has to be downloaded and decoded all over again next time)
+  const noteSounds = {};
+
   function playSound(url, volume = 1, rate = 1) {
     return new Promise((resolve, reject) => {
-      let a = new Howl({
-        src: [url],
-        volume: volume,
-        onend: function () {
-          resolve();
-        },
-      });
-      a.rate(rate);
-      a.play();
-      a.fade( volume, 0.0, 1000 );//a.duration() * 500 );
+      if (!noteSounds[url]) {
+        noteSounds[url] = new Howl({
+          src: [url],
+          volume: volume,
+          //forget samples that fail to load (like on a network hiccup) so the next note tries again
+          onloaderror: function () {
+            delete noteSounds[url];
+            this.unload();
+          },
+        });
+      }
+      let a = noteSounds[url];
+      let id = a.play();
+      a.once("end", () => resolve(), id);
+      a.rate(rate, id);
+      a.fade( volume, 0.0, 1000, id );//a.duration() * 500 );
       cj.lastSound = a;
+      lastSoundId = id;
     });
   }
 
@@ -246,6 +259,7 @@ const ComfyJazz = (options = {}) => {
   let pattern = -1;
   let scale = null;
   let loopStartTime = null;
+  let lastSoundId = null;
   let currentStep = 0;
   let lastNoteTime = 0;
   let lastNoteNumber = 0;
