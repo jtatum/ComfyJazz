@@ -344,6 +344,18 @@ const ComfyJazz = (options = {}) => {
         },
       ],
     },
+    moon: {
+      loop: "moon_loop.opus",
+      bpm: 70,
+      transpose: -5,
+      chords: `
+        G     | Gmaj7 | Em9   | Am D7  |
+        G     | Gmaj7 | Em9   | Am D7  |
+        G     | Gmaj7 | Em9   | Am D7  |
+        G     | Gmaj7 | Em9   | Dm7 D7 |
+        Cmaj7 | C7    | Gmaj7 | Am7 D7 |
+        C     | C7    | Gmaj7 | Am7 D7 |`,
+    },
   };
 
   const scales = {
