@@ -58,7 +58,7 @@
 	//Start ComfyJazz
 	const comfyJazz = ComfyJazz({
 		autoNotesChance:0.3,
-		instrument: instrument || "piano",
+		instrument: instrument, //if it's not in the URL, the song picks (or piano)
 		song: song || "comfy",
 		volume: volume || 1
 	});
