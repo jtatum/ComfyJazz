@@ -28,7 +28,7 @@
   "homepage": "https://github.com/instafluff/ComfyJazz#readme",
   "dependencies": {
     "comfy.js": "1.1.29",
-    "howler": "2.2.0",
+    "howler": "2.2.4",
     "webwebweb": "^1.6.1"
   }
 }
