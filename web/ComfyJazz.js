@@ -272,6 +272,7 @@ const ComfyJazz = (options = {}) => {
   //and then either
   //  bpm + chords: the chord chart, with a | between bars (see chartToProgression)
   //  duration + progression: hand-tuned chords with start/end times in seconds, like comfy below
+  //and optionally an instrument, played when the URL doesn't pick one
   const songs = {
     //the original ComfyJazz loop: | Gmaj7 | D | Gmaj7 | Am7 D7 | Bm7 | Em7 | Am7 | D7 | at 70bpm
     comfy: {
@@ -343,6 +344,19 @@ const ComfyJazz = (options = {}) => {
           root: 2,
         },
       ],
+    },
+    moon: {
+      loop: "moon_loop.opus",
+      bpm: 70,
+      transpose: -5,
+      instrument: "guitar",
+      chords: `
+        G     | Gmaj7 | Em9   | Am D7  |
+        G     | Gmaj7 | Em9   | Am D7  |
+        G     | Gmaj7 | Em9   | Am D7  |
+        G     | Gmaj7 | Em9   | Dm7 D7 |
+        Cmaj7 | C7    | Gmaj7 | Am7 D7 |
+        C     | C7    | Gmaj7 | Am7 D7 |`,
     },
   };
 
@@ -684,6 +698,9 @@ const ComfyJazz = (options = {}) => {
   }
 
   const song = loadSong(cj.song);
+
+  //an instrument passed in wins, then the song's own, then the default
+  cj.instrument = options.instrument || song.instrument || defaultOptions.instrument;
 
   return cj;
 };
