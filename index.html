@@ -1,7 +1,8 @@
 <html>
 	<head>
-		<script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.0/howler.min.js" integrity="sha512-ALoawPS0JxHQ+8dGL7htZIlVNRaE/SN9gHD4G8pJJTi9H4BQ/3PjdvhggSGR34g00mvTPFkxQuveQUsJA5664Q==" crossorigin="anonymous"></script>
-		<script src="https://cdn.jsdelivr.net/npm/comfy.js@latest/dist/comfy.min.js"></script>
+		<!-- web/vendor is filled in by npm install, see copy-libraries.js -->
+		<script src="web/vendor/howler.min.js"></script>
+		<script src="web/vendor/comfy.min.js"></script>
 		<script src="web/ComfyJazz.js"></script>
 
 		<style>
@@ -50,6 +51,7 @@
 	const params = new URLSearchParams(location.search);
 
 	const instrument = params.get("instrument");
+	const song = params.get("song");
 	const volume = params.get("volume");
 	const autostart = params.get("autostart") === "true";
 
@@ -57,6 +59,7 @@
 	const comfyJazz = ComfyJazz({
 		autoNotesChance:0.3,
 		instrument: instrument || "piano",
+		song: song || "comfy",
 		volume: volume || 1
 	});
 

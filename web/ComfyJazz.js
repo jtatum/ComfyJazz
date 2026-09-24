@@ -5,11 +5,10 @@ const ComfyJazz = (options = {}) => {
   const defaultOptions = {
     baseUrl: "web/sounds",
     instrument: "piano",
+    song: "comfy", //which background song to play, see songs below
     autoNotesDelay: 300, //how often should we try to play notes?
     autoNotesChance: 0.2, //what % (0-1) chance is there to play an auto note?
     playAutoNotes: true, //should we automatically play notes?
-    backgroundLoopUrl: "jazz_loop.ogg",
-    backgroundLoopDuration: 27.428,
     volume: 1,
   };
 
@@ -25,7 +24,8 @@ const ComfyJazz = (options = {}) => {
       cj.backgroundSound.volume(vol);
     }
       if( cj.lastSound ) {
-      cj.lastSound.volume(vol);
+      //just the last note, not every note sharing its sample (most of those have faded out already)
+      cj.lastSound.volume(vol, lastSoundId);
     }
 
   };
@@ -41,23 +41,14 @@ const ComfyJazz = (options = {}) => {
   /////////////////////
 
   async function startComfyJazz() {
-    let startTime = performance.now();
-
-    //initial start of the background music
-    playBackgroundSound(`${cj.baseUrl}/${cj.backgroundLoopUrl}`, cj.volume, 1); //1.0594630943592953
+    //the background music loops seamlessly on its own, we just follow along to know which chord we're on
+    playBackgroundLoop(`${cj.baseUrl}/${song.loop}`, cj.volume);
 
     //this will Automatically play a note and then call itself again after a delay
     const AutomaticPlayNote = async () => {
-      let currentTime = (performance.now() - startTime) / 1000;
+      let currentTime = getLoopPosition();
 
-      if (currentTime > cj.backgroundLoopDuration) {
-        startTime = performance.now();
-        currentTime = 0;
-
-        // play the background music again
-        playBackgroundSound(`${cj.baseUrl}/${cj.backgroundLoopUrl}`, cj.volume, 1);
-      }
-
+      const scaleProgression = song.progression;
       for (let i = 0; i < scaleProgression.length; i++) {
         if (scaleProgression[i].start <= currentTime && currentTime <= scaleProgression[i].end) {
           currentScaleProgression = i;
@@ -116,34 +107,62 @@ const ComfyJazz = (options = {}) => {
   	return n;
   }
 
-  function playBackgroundSound(url, volume = 1, rate = 1) {
-    return new Promise((resolve, reject) => {
-      let a = new Howl({
-        src: [url],
-        volume: volume,
-        onend: function () {
-          resolve();
-        },
-      });
-      a.rate(rate);
-      a.play();
-      cj.backgroundSound = a;
+  function playBackgroundLoop(url, volume = 1) {
+    const sound = new Howl({
+      src: [url],
+      volume: volume,
+      loop: true,
+      onload: () => {
+        if (Math.abs(sound.duration() - song.duration) > 0.05) {
+          console.warn(`ComfyJazz: ${url} is ${sound.duration()}s long but the song's chords add up to ${song.duration}s`);
+        }
+      },
     });
+    //Howler fires "play" again every time the loop comes around (late, on a timer), so only note the first one
+    sound.once("play", () => {
+      loopStartTime = Howler.usingWebAudio ? Howler.ctx.currentTime : 0;
+    });
+    sound.play();
+    cj.backgroundSound = sound;
   }
+
+  //How far into the background loop are we, in seconds?
+  function getLoopPosition() {
+    const sound = cj.backgroundSound;
+    if (!sound || loopStartTime === null) {
+      return 0;
+    }
+    const duration = sound.duration() || song.duration;
+    //the audio clock is what the loop actually plays on, so following it never drifts
+    const elapsed = Howler.usingWebAudio ? Howler.ctx.currentTime - loopStartTime : sound.seek();
+    return elapsed % duration;
+  }
+
+  //One Howl per sample, reused for every note. Howler recycles each Howl's finished sounds, so this
+  //stays small, where a new Howl per note piled up forever (and unloading them throws away the
+  //decoded sample, so it has to be downloaded and decoded all over again next time)
+  const noteSounds = {};
 
   function playSound(url, volume = 1, rate = 1) {
     return new Promise((resolve, reject) => {
-      let a = new Howl({
-        src: [url],
-        volume: volume,
-        onend: function () {
-          resolve();
-        },
-      });
-      a.rate(rate);
-      a.play();
-      a.fade( volume, 0.0, 1000 );//a.duration() * 500 );
+      if (!noteSounds[url]) {
+        noteSounds[url] = new Howl({
+          src: [url],
+          volume: volume,
+          //forget samples that fail to load (like on a network hiccup) so the next note tries again
+          onloaderror: function () {
+            delete noteSounds[url];
+            this.unload();
+          },
+        });
+      }
+      let a = noteSounds[url];
+      let id = a.play();
+      a.once("end", () => resolve(), id);
+      a.rate(rate, id);
+      a.fade( volume, 0.0, 1000, id );//a.duration() * 500 );
       cj.lastSound = a;
+      lastSoundId = id;
     });
   }
 
@@ -153,7 +172,7 @@ const ComfyJazz = (options = {}) => {
       noteCount = 0;
     }
 
-    let e = scaleProgression[currentScaleProgression];
+    let e = song.progression[currentScaleProgression];
     scale = e.scale;
     let n = getNote(scale);
     while (n === lastNoteNumber) {
@@ -190,8 +209,8 @@ const ComfyJazz = (options = {}) => {
       changePattern();
     }
     let t = patterns[pattern][currentStep];
-    let n = t + scales[scale][t % 12];
-    let r = transpose + n;
+    let n = t + scale[t % 12];
+    let r = song.transpose + n;
     currentStep = (currentStep + 1) % patterns[pattern].length;
     return r;
   }
@@ -212,7 +231,7 @@ const ComfyJazz = (options = {}) => {
   }
 
   function scaleifyNote(t, e) {
-    var n = ((t % 12) + 5) % 12;
+    var n = mod(t - song.transpose, 12);
     if (
       void 0 ==
       e.filter(function (t) {
@@ -221,9 +240,13 @@ const ComfyJazz = (options = {}) => {
     ) {
       var r = getClosestTarget(e, t),
         o = (t -= n - r);
-      t = o += scales[scale][((o % 12) + 5) % 12];
+      t = o += scale[mod(o - song.transpose, 12)];
     }
     return t;
+  }
+
+  function mod(n, m) {
+    return ((n % m) + m) % m;
   }
 
   function getNoteFromSemitone(tone) {
@@ -234,79 +257,94 @@ const ComfyJazz = (options = {}) => {
   let root = 0;
   let lastRoot = undefined;
   let pattern = -1;
-  let scale = "custom";
-  let transpose = -5;
+  let scale = null;
+  let loopStartTime = null;
+  let lastSoundId = null;
   let currentStep = 0;
   let lastNoteTime = 0;
   let lastNoteNumber = 0;
   let noteCount = 0;
   const maxnNotesPerPattern = 30;
 
-  const scaleProgression = [
-    {
-      start: 0,
-      end: 3.428,
-      scale: "custom",
-      targetNotes: [2, 4, 7],
-      root: 7,
+  //Background songs, picked with the ?song= URL parameter. Each one has:
+  //  loop: audio file in the sounds folder, trimmed so it repeats seamlessly
+  //  transpose: the melody patterns are written in C, this shifts them into the song's key (G = -5)
+  //and then either
+  //  bpm + chords: the chord chart, with a | between bars (see chartToProgression)
+  //  duration + progression: hand-tuned chords with start/end times in seconds, like comfy below
+  const songs = {
+    //the original ComfyJazz loop: | Gmaj7 | D | Gmaj7 | Am7 D7 | Bm7 | Em7 | Am7 | D7 | at 70bpm
+    comfy: {
+      loop: "jazz_loop.ogg",
+      duration: 27.428,
+      transpose: -5,
+      progression: [
+        {
+          start: 0,
+          end: 3.428,
+          scale: "custom",
+          targetNotes: [2, 4, 7],
+          root: 7,
+        },
+        {
+          start: 3.428,
+          end: 6.857,
+          scale: "diatonic",
+          targetNotes: [2, 4, 7],
+          root: 2,
+        },
+        {
+          start: 6.857,
+          end: 10.285,
+          scale: "custom",
+          targetNotes: [2, 4, 7],
+          root: 7,
+        },
+        {
+          start: 10.285,
+          end: 12,
+          scale: "diatonic",
+          targetNotes: [4, 5, 9],
+          root: 9,
+        },
+        {
+          start: 12,
+          end: 13.714,
+          scale: "custom2",
+          targetNotes: [2, 4, 11],
+          root: 2,
+        },
+        {
+          start: 13.714,
+          end: 17.142,
+          scale: "custom",
+          targetNotes: [4, 7, 11],
+          root: 11,
+        },
+        {
+          start: 17.142,
+          end: 20.571,
+          scale: "custom",
+          targetNotes: [0, 2, 4],
+          root: 4,
+        },
+        {
+          start: 20.571,
+          end: 24,
+          scale: "diatonic",
+          targetNotes: [4, 5, 9],
+          root: 9,
+        },
+        {
+          start: 24,
+          end: 27.428,
+          scale: "custom2",
+          targetNotes: [2, 4, 11],
+          root: 2,
+        },
+      ],
     },
-    {
-      start: 3.428,
-      end: 6.857,
-      scale: "diatonic",
-      targetNotes: [2, 4, 7],
-      root: 2,
-    },
-    {
-      start: 6.857,
-      end: 10.285,
-      scale: "custom",
-      targetNotes: [2, 4, 7],
-      root: 7,
-    },
-    {
-      start: 10.285,
-      end: 12,
-      scale: "diatonic",
-      targetNotes: [4, 5, 9],
-      root: 9,
-    },
-    {
-      start: 12,
-      end: 13.714,
-      scale: "custom2",
-      targetNotes: [2, 4, 11],
-      root: 2,
-    },
-    {
-      start: 13.714,
-      end: 17.142,
-      scale: "custom",
-      targetNotes: [4, 7, 11],
-      root: 11,
-    },
-    {
-      start: 17.142,
-      end: 20.571,
-      scale: "custom",
-      targetNotes: [0, 2, 4],
-      root: 4,
-    },
-    {
-      start: 20.571,
-      end: 24,
-      scale: "diatonic",
-      targetNotes: [4, 5, 9],
-      root: 9,
-    },
-    {
-      start: 24,
-      end: 27.428,
-      scale: "custom2",
-      targetNotes: [2, 4, 11],
-      root: 2,
-    },
-  ];
+  };
 
   const scales = {
     diatonic: [0, -1, 0, -1, 0, 0, -1, 0, -1, 0, -1, 0],
@@ -559,6 +597,93 @@ const ComfyJazz = (options = {}) => {
       },
     },
   ];
+
+  ////////////////////////////////
+  //Songs from chord charts
+  ////////////////////////////////
+
+  const noteNames = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+
+  //What to play over each kind of chord, checked in order against whatever comes after the root
+  //(the "m7b5" in "Bm7b5"). scale is the notes the melody may use and targets are the chord tones it
+  //lands on when the chord changes, both in semitones above the root. Avoid notes, like the 4th over
+  //a major chord, are left out of the scale so the melody steps around them.
+  const chordTypes = [
+    { match: /^(o|dim)/, scale: [0, 2, 3, 5, 6, 8, 9, 11], targets: [3, 6, 9] }, //diminished
+    { match: /^(h|ø|(-|m)7?b5)/, scale: [0, 2, 3, 5, 6, 8, 10], targets: [3, 6, 10] }, //half diminished
+    { match: /^(-|m(?!aj))(\^|maj|M)/, scale: [0, 2, 3, 5, 7, 9, 11], targets: [3, 7, 11] }, //minor major 7th
+    { match: /^(-|m(?!aj))/, scale: [0, 2, 3, 5, 7, 9, 10], targets: [3, 7, 10] }, //minor
+    { match: /^(\^|maj|M|Δ).*#11/, scale: [0, 2, 4, 6, 7, 9, 11], targets: [4, 7, 11] }, //major 7th #11
+    { match: /^(\^|maj|M|Δ)/, scale: [0, 2, 4, 7, 9, 11], targets: [4, 7, 11] }, //major 7th
+    { match: /^(6|69|add9|2)?$/, scale: [0, 2, 4, 7, 9, 11], targets: [4, 7, 9] }, //major triad or 6th
+    { match: /^(\+|aug|7\+|7#5)/, scale: [0, 2, 4, 6, 8, 10], targets: [4, 8, 10] }, //augmented
+    { match: /sus/, scale: [0, 2, 5, 7, 9, 10], targets: [5, 7, 10] }, //suspended
+    { match: /alt/, scale: [0, 1, 3, 4, 6, 8, 10], targets: [4, 10, 3] }, //altered dominant
+    { match: /b9|#9/, scale: [0, 1, 3, 4, 6, 7, 9, 10], targets: [4, 7, 10] }, //dominant b9 or #9
+    { match: /#11|b5/, scale: [0, 2, 4, 6, 7, 9, 10], targets: [4, 7, 10] }, //dominant #11
+    { match: /b13/, scale: [0, 2, 4, 7, 8, 10], targets: [4, 7, 10] }, //dominant b13
+    { match: /^(7|9|11|13)/, scale: [0, 2, 4, 7, 9, 10], targets: [4, 7, 10] }, //dominant
+  ];
+
+  //Work out the melody scale and landing notes for a chord symbol like "Bbmaj7" or "F#m7b5".
+  //These are in "C terms", before transposing, since that's how the melody patterns are written.
+  function chordToScale(symbol, transpose) {
+    const parts = /^([A-G])(b|#)?([^/]*)(\/.*)?$/.exec(symbol);
+    const quality = parts ? parts[3].replace(/[()]/g, "") : "";
+    const type = parts && chordTypes.find((type) => type.match.test(quality));
+    if (!type) {
+      throw new Error(`ComfyJazz: I don't know how to play the chord "${symbol}"`);
+    }
+    const root = noteNames[parts[1]] + (parts[2] === "#" ? 1 : parts[2] === "b" ? -1 : 0);
+    const inScale = (note) => type.scale.includes(mod(note + transpose - root, 12));
+    return {
+      root: symbol, //the note picker only uses this to notice that the chord changed
+      //nudge any note that isn't in the scale onto a neighbor that is
+      scale: [...Array(12).keys()].map((note) => (inScale(note) ? 0 : inScale(note - 1) ? -1 : 1)),
+      targetNotes: type.targets.map((interval) => mod(root + interval - transpose, 12)),
+    };
+  }
+
+  //Turn a chord chart like "Cmaj7 | Am7 | Dm7 G7 | %" into timed progression steps. Each bar is
+  //split evenly between its chords, and "%" repeats the bar before, like in iReal Pro.
+  function chartToProgression({ chords, bpm, beatsPerBar = 4, transpose }) {
+    const barLength = (beatsPerBar * 60) / bpm;
+    const progression = [];
+    let time = 0;
+    let lastBar = [];
+    for (const bar of chords.split("|").map((bar) => bar.trim()).filter((bar) => bar)) {
+      const barChords = bar === "%" ? lastBar : bar.split(/\s+/);
+      for (const chord of barChords) {
+        const length = barLength / barChords.length;
+        const last = progression[progression.length - 1];
+        if (last && last.root === chord) {
+          last.end += length; //same chord again, just hold it longer
+        } else {
+          progression.push({ start: time, end: time + length, ...chordToScale(chord, transpose) });
+        }
+        time += length;
+      }
+      lastBar = barChords;
+    }
+    return { progression, duration: time };
+  }
+
+  function loadSong(name) {
+    let definition = songs[name];
+    if (!definition) {
+      console.warn(`ComfyJazz: there's no song called "${name}", playing "${defaultOptions.song}" instead`);
+      definition = songs[defaultOptions.song];
+    }
+    if (definition.chords) {
+      return { ...definition, ...chartToProgression(definition) };
+    }
+    return {
+      ...definition,
+      progression: definition.progression.map((step) => ({ ...step, scale: scales[step.scale] })),
+    };
+  }
+
+  const song = loadSong(cj.song);
 
   return cj;
 };

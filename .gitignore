@@ -102,3 +102,9 @@ dist
 
 # TernJS port file
 .tern-port
+
+# Libraries copied out of node_modules by npm install (copy-libraries.js)
+web/vendor/
+
+# GitHub Pages site assembled by the deploy workflow
+_site/
