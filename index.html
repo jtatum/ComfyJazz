@@ -39,7 +39,7 @@
 		</style>
 	</head>
 	<body>
-		<div id="start-overlay"><span>Click to start</span></div>
+		<div id="start-overlay" class="hide"><span>Click to start</span></div>
 		<div id="comfy-controls" class="hide">
 			<h1>Comfy Jazz Control Panel</h1>
 			<label for="">Volume:
@@ -53,7 +53,6 @@
 	const instrument = params.get("instrument");
 	const song = params.get("song");
 	const volume = params.get("volume");
-	const autostart = params.get("autostart") === "true";
 
 	//Start ComfyJazz
 	const comfyJazz = ComfyJazz({
@@ -62,14 +61,20 @@
 		song: song || "comfy",
 		volume: volume || 1
 	});
+	comfyJazz.start();
 
-	if (autostart) {
-		document.getElementById('start-overlay').classList.add('hide');
-		comfyJazz.start();
-	} else {
-		document.getElementById('start-overlay').addEventListener('click', () => {
-			document.getElementById('start-overlay').classList.add('hide');
-			comfyJazz.start();
+	//Browsers hold sound back until you click the page, unless they've been told not to (OBS browser
+	//sources are), so only ask for a click if that's what's happening
+	const audioContext = Howler.ctx;
+	if (audioContext && audioContext.state !== 'running') {
+		const overlay = document.getElementById('start-overlay');
+		overlay.classList.remove('hide');
+		overlay.addEventListener('click', () => audioContext.resume());
+		//a key press anywhere works too (Howler listens for those)
+		audioContext.addEventListener('statechange', () => {
+			if (audioContext.state === 'running') {
+				overlay.classList.add('hide');
+			}
 		});
 	}
 
