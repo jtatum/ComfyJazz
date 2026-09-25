@@ -72,6 +72,11 @@ const ComfyJazz = (options = {}) => {
   //Play a note with possible random delay
   async function playNoteRandomly(minRandom = 0, maxRandom = 200) {
     setTimeout(async () => {
+      //while the browser is holding sound back (until someone clicks the page), Howler saves up
+      //every note and plays them all at once when it lets go, so skip them instead
+      if (Howler.ctx && Howler.ctx.state !== "running") {
+        return;
+      }
       let sound = getNextNote();
 	  const instruments = cj.instrument.split( "," ).map( x => x.trim() );
 	  let instrument = instruments[ getRandomInt( instruments.length ) ];

@@ -24,21 +24,17 @@ https://jtatum.github.io/ComfyJazz/?channel=julieee22
 - `instrument` - Instrument to use: piano, sax, clarinet, vibraphone, harp, guitar, guzheng, twinkle (default: piano)
 - `song` - Background song to play: comfy (default: comfy)
 - `volume` - Volume level from 0 to 1 (default: 1)
-- `autostart` - Set to `true` to start automatically (recommended for OBS browser sources)
-
-### OBS Setup ###
-
-Add as a Browser Source with `autostart=true`:
-```
-https://jtatum.github.io/ComfyJazz/?channel=yourchannel&autostart=true
-```
-
-If audio doesn't start, right-click the source → "Interact" → click anywhere to start.
 
 You can combine parameters:
 ```
 https://jtatum.github.io/ComfyJazz/?channel=julieee22&instrument=vibraphone&volume=0.5
 ```
+
+### Starting Up ###
+
+OBS browser sources start playing on their own. (URLs with `autostart=true` from older instructions still work, it just isn't needed anymore.)
+
+In a regular browser you'll get a "Click to start" screen instead, because browsers don't let a page make sound until you've clicked on it. To skip that in Chrome, click the site controls icon next to the address → Site settings → set Sound to Allow.
 
 ## Running Locally ##
 
