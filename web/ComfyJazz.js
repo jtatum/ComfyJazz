@@ -613,8 +613,8 @@ const ComfyJazz = (options = {}) => {
         B4 B4 B4 B4 C5 -  D5 D5 | D5 G4 .  G4 .  .  .  .  | G4 G4 G4 G4 A4 -  B4 B4 | B4 A4 .  A4 .  .  .  .  |
         B4 B4 B4 B4 C5 -  D5 D5 | D5 G4 .  G4 .  .  .  .  | G4 G4 G4 G4 A4 -  B4 B4 | B4 A4 .  A4 .  .  .  .  |
         B4 B4 B4 B4 C5 -  D5 D5 | D5 G4 .  G4 .  .  .  .  | G4 G4 G4 G4 A4 -  B4 B4 | B4 A4 .  A4 .  .  .  .  |
-        B4 B4 B4 B4 C5 -  D5 D5 | D5 G4 .  G4 .  .  .  .  | G4 G4 G4 G4 A4 -  B4 B4 | B4 -  A4 A4 .  .  .  .  |
-        .  .  .  .  .  E4 G4 -  | Bb4 - .  A4 -  G4 E4 -  | D4 -  .  .  .  .  .  .  | .  .  G4 -  G4 G4 .  .  |
+        B4 B4 B4 B4 C5 -  D5 D5 | D5 G4 .  G4 .  .  .  .  | G4 G4 G4 G4 A4 -  B4 B4 | Bb4 - A4 A4 .  .  .  .  |
+        .  .  .  .  .  E4 G4 -  | Bb4 - .  A4 -  G4 E4 -  | D4 -  .  .  .  .  .  .  | .  .  G4 -  F#4 F4 .  . |
         E4 -  .  .  .  .  G4 -  | Bb4 - .  A4 -  G4 .  .  | B4 B4 B4 B4 B4 C5 B4 A4 | -  -  .  .  .  .  .  .  |`,
     },
   };
