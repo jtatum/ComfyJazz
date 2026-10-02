@@ -24,6 +24,7 @@ https://jtatum.github.io/ComfyJazz/?channel=julieee22
 - `instrument` - Instrument to use: piano, sax, clarinet, vibraphone, harp, guitar, guzheng, twinkle (default: piano)
 - `song` - Background song to play: comfy, moon (default: comfy)
 - `melody` - For songs with a melody (moon), how often to play bits of the tune instead of improvising, from 0 (never) to 1 (every phrase, every time) (default: the song's own, 0.3)
+- `spice` - For songs with a melody, how much to play around with the tune like a jazz player would, from 0 (just as written) to 1 (default: the song's own, 0.5)
 - `volume` - Volume level from 0 to 1 (default: 1)
 
 You can combine parameters:

@@ -56,6 +56,7 @@
 	const song = params.get("song");
 	const volume = params.get("volume");
 	const melody = params.get("melody");
+	const spice = params.get("spice");
 
 	//Start ComfyJazz
 	const comfyJazz = ComfyJazz({
@@ -63,7 +64,8 @@
 		instrument: instrument, //if it's not in the URL, the song picks (or piano)
 		song: song || "comfy",
 		volume: volume || 1,
-		melodyChance: melody === null ? undefined : Number(melody) //if it's not in the URL, the song picks
+		melodyChance: melody === null ? undefined : Number(melody), //if it's not in the URL, the song picks
+		spice: spice === null ? undefined : Number(spice) //same here
 	});
 	comfyJazz.start();
 
