@@ -327,6 +327,8 @@ const ComfyJazz = (options = {}) => {
   //  instrument: played when the URL doesn't pick one
   //  melody: the song's own tune, written bar by bar under the chords (see melodyToPhrases), with
   //  melodyChance: how often (0-1) each phrase of it gets played instead of improvising
+  //  swing: how much of each beat the first of a pair of eighth notes in the melody gets. 0.5 is
+  //  straight (even), 0.67 is a triplet swing, 0.75 is a dotted eighth and a sixteenth
   const songs = {
     //the original ComfyJazz loop: | Gmaj7 | D | Gmaj7 | Am7 D7 | Bm7 | Em7 | Am7 | D7 | at 70bpm
     comfy: {
@@ -414,6 +416,7 @@ const ComfyJazz = (options = {}) => {
       //Julie's theme. Every A section is the same, except the last ends on a slightly different
       //bar (before the bridge)
       melodyChance: 0.3,
+      swing: 0.67,
       melody: `
         B4 B4 B4 B4 C5 -  D5 D5 | D5 G4 .  G4 .  .  .  .  | G4 G4 G4 G4 A4 -  B4 B4 | B4 A4 .  A4 .  .  .  .  |
         B4 B4 B4 B4 C5 -  D5 D5 | D5 G4 .  G4 .  .  .  .  | G4 G4 G4 G4 A4 -  B4 B4 | B4 A4 .  A4 .  .  .  .  |
@@ -749,8 +752,8 @@ const ComfyJazz = (options = {}) => {
   //Turn a melody like "B4 - D5 . | G4 G4 A4 B4" into phrases of timed notes. Like the chords, each
   //bar is split evenly between what's in it: a note (name, then octave, so C5 is an octave above
   //middle C), "-" to hold the note before, or "." for a rest. Empty bars are fine too. A rest of
-  //at least two beats ends a phrase.
-  function melodyToPhrases({ melody, bpm, beatsPerBar = 4 }) {
+  //at least two beats ends a phrase. Eighth notes are written evenly and swung afterwards.
+  function melodyToPhrases({ melody, bpm, beatsPerBar = 4, swing = 0.5 }) {
     const barLength = (beatsPerBar * 60) / bpm;
     const notes = [];
     let time = 0;
@@ -790,6 +793,18 @@ const ComfyJazz = (options = {}) => {
       } else {
         phrases.push({ start: note.start, end: note.end, notes: [note] });
       }
+    }
+    //stretch the first half of every beat to `swing` of it, and squeeze the second half to fit
+    const beat = 60 / bpm;
+    const swingTime = (time) => {
+      const beats = time / beat;
+      const whole = Math.floor(beats + 1e-6);
+      const part = Math.max(0, beats - whole);
+      return (whole + (part < 0.5 ? part * 2 * swing : swing + (part - 0.5) * 2 * (1 - swing))) * beat;
+    };
+    for (const item of [...notes, ...phrases]) {
+      item.start = swingTime(item.start);
+      item.end = swingTime(item.end);
     }
     return phrases;
   }
