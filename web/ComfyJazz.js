@@ -142,6 +142,7 @@ const ComfyJazz = (options = {}) => {
   //Play a note of improvising after a delay (in ms), now and then with a grace note in front
   function playImprovNote(delay, volume = 1) {
     const instrument = pickInstrument();
+    volume *= accent(getLoopPosition() + delay / 1000);
     const grace = Math.random() < 0.06 * (0.5 + melodySpice);
     const lead = grace ? 45 : 0; //the grace note goes just before the beat, so the note itself is on it
     setTimeout(() => {
@@ -156,6 +157,19 @@ const ComfyJazz = (options = {}) => {
         playSound(`${cj.baseUrl}/${instrument}/${sound.url}.ogg`, cj.volume * volume, sound.playbackRate);
       }
     }, Math.max(0, delay - lead) + Math.random() * 25); //a hair behind the beat
+  }
+
+  //How hard to play a note at this time in the song, like a player would: the beat gets the accent
+  //(beat 1 the most), the swung offbeats are played lighter, and no two notes come out quite the same
+  function accent(time) {
+    if (!song.bpm) {
+      return 0.9 + 0.2 * Math.random();
+    }
+    const beats = (time * song.bpm) / 60 + 0.05; //a little slack for notes a hair early
+    const offbeat = beats - Math.floor(beats) > 0.3;
+    const beat = mod(Math.floor(beats), 4);
+    const level = offbeat ? 0.75 : beat === 0 ? 1 : beat === 2 ? 0.95 : 0.88;
+    return level * (0.9 + 0.2 * Math.random());
   }
 
   function playMidiNote(note, instrument, volume = 1) {
@@ -197,9 +211,10 @@ const ComfyJazz = (options = {}) => {
       }
       const instrument = pickInstrument(); //the whole phrase on one instrument
       const { events, end } = embellishPhrase(phrase);
-      for (const { time, note, volume } of events) {
+      for (const { time, note, volume: level } of events) {
         const delay = (wait + time - start) * 1000;
-        if (volume > 0.5) {
+        const volume = level * accent(time) * melodyVolume;
+        if (level > 0.5) {
           claim(performance.now() + delay); //grace notes are too quick to get in anyone's way
         }
         setTimeout(() => playMidiNote(note, instrument, volume), delay);
@@ -312,6 +327,14 @@ const ComfyJazz = (options = {}) => {
         endBeat += 0.5 * (echo.length + 1);
       }
     }
+    //swell a little toward the high notes, and ease off on the landing
+    const main = events.filter((event) => event.volume === 1);
+    const low = Math.min(...main.map((event) => event.note));
+    const high = Math.max(...main.map((event) => event.note));
+    for (const event of events) {
+      event.volume *= 0.85 + (0.15 * (event.note - low)) / (high - low || 1);
+    }
+    main[main.length - 1].volume *= 0.9;
     return { events, end: melodyTime(endBeat) };
   }
 
@@ -417,6 +440,7 @@ const ComfyJazz = (options = {}) => {
   const noteSounds = {};
 
   function playSound(url, volume = 1, rate = 1) {
+    volume = Math.min(1, volume);
     return new Promise((resolve, reject) => {
       if (!noteSounds[url]) {
         noteSounds[url] = new Howl({
@@ -550,6 +574,7 @@ const ComfyJazz = (options = {}) => {
   //  swing: how much of each beat the first of a pair of eighth notes gets. 0.5 is
   //  straight (even), 0.67 is a triplet swing, 0.75 is a dotted eighth and a sixteenth
   //  spice: how much (0-1) to play around with the melody (see embellishPhrase), 0 is as written
+  //  melodyVolume: how loud the melody plays next to the improvising (1 is the same)
   const songs = {
     //the original ComfyJazz loop: | Gmaj7 | D | Gmaj7 | Am7 D7 | Bm7 | Em7 | Am7 | D7 | at 70bpm
     comfy: {
@@ -641,6 +666,7 @@ const ComfyJazz = (options = {}) => {
       melodyChance: 0.3,
       swing: 0.67,
       spice: 0.5,
+      melodyVolume: 0.85, //a touch under the improvising, so it blends in
       melody: `
         B4 B4 B4 B4 C5 -  D5 D5 | D5 G4 .  G4 .  .  .  .  | G4 G4 G4 G4 A4 -  B4 B4 | B4 A4 .  A4 .  .  .  .  |
         B4 B4 B4 B4 C5 -  D5 D5 | D5 G4 .  G4 .  .  .  .  | G4 G4 G4 G4 A4 -  B4 B4 | B4 A4 .  A4 .  .  .  .  |
@@ -1047,6 +1073,7 @@ const ComfyJazz = (options = {}) => {
   cj.instrument = options.instrument || song.instrument || defaultOptions.instrument;
   const melodyChance = cj.melodyChance ?? song.melodyChance ?? 0.3;
   const melodySpice = cj.spice ?? song.spice ?? 0.5;
+  const melodyVolume = song.melodyVolume ?? 1;
 
   return cj;
 };
