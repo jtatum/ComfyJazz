@@ -88,6 +88,21 @@ const ComfyJazz = (options = {}) => {
   let improvDecided = -1; //the last eighth note we rolled for, counted from when the loop started
   let improvBusyUntil = 0;
 
+  //Notes take turns, one at a time, like a single player: each one claims its spot (a
+  //performance.now() time), and a note that wants a spot that's taken waits for the next free one.
+  //So lots of notes at once (a busy chat) turn into one longer line instead of a pile-up.
+  let claimedTimes = [];
+
+  function isFree(at) {
+    return !claimedTimes.some((time) => Math.abs(time - at) < 100);
+  }
+
+  function claim(at) {
+    const now = performance.now();
+    claimedTimes = claimedTimes.filter((time) => time > now - 500);
+    claimedTimes.push(at);
+  }
+
   function improvise() {
     const elapsed = getElapsedTime();
     if (!cj.playAutoNotes || !song.bpm || elapsed === null) {
@@ -116,8 +131,9 @@ const ComfyJazz = (options = {}) => {
         continue;
       }
       if (Math.random() < 0.012 * (0.5 + melodySpice)) {
-        improvBusyUntil = at + playNoteProgression(3 + getRandomInt(4));
-      } else if (Math.random() < noteChance) {
+        improvBusyUntil = performance.now() + playNoteProgression(3 + getRandomInt(4));
+      } else if (Math.random() < noteChance && isFree(at)) {
+        claim(at);
         playImprovNote(at - performance.now());
       }
     }
@@ -182,7 +198,11 @@ const ComfyJazz = (options = {}) => {
       const instrument = pickInstrument(); //the whole phrase on one instrument
       const { events, end } = embellishPhrase(phrase);
       for (const { time, note, volume } of events) {
-        setTimeout(() => playMidiNote(note, instrument, volume), (wait + time - start) * 1000);
+        const delay = (wait + time - start) * 1000;
+        if (volume > 0.5) {
+          claim(performance.now() + delay); //grace notes are too quick to get in anyone's way
+        }
+        setTimeout(() => playMidiNote(note, instrument, volume), delay);
       }
       melodyPlayingUntil = Math.max(melodyPlayingUntil, performance.now() + (wait + end - start) * 1000);
     });
@@ -296,7 +316,8 @@ const ComfyJazz = (options = {}) => {
   }
 
   //Play a run of notes, in time with the song: swung eighth notes, or now and then quicker triplets.
-  //Gives back how long it takes, in ms.
+  //It waits its turn for any spots that are already taken, and drops whatever would have to wait
+  //too long. Gives back how long until it's done, in ms.
   function playNoteProgression(numNotes) {
     const elapsed = getElapsedTime();
     if (!song.bpm || elapsed === null) {
@@ -314,10 +335,21 @@ const ComfyJazz = (options = {}) => {
     while (timeAt(beat) < position + 0.03) {
       beat += triplets ? 1 : 0.5;
     }
-    for (let i = 0; i < numNotes; i++) {
-      playImprovNote((timeAt(beat + i * step) - position) * 1000, i === 0 ? 1 : 0.85);
+    let played = 0;
+    let delay = 0;
+    for (; played < numNotes; beat += step) {
+      delay = (timeAt(beat) - position) * 1000;
+      if (delay > 4000) {
+        break;
+      }
+      const at = performance.now() + delay;
+      if (isFree(at)) {
+        claim(at);
+        playImprovNote(delay, played === 0 ? 1 : 0.85);
+        played++;
+      }
     }
-    return (timeAt(beat + numNotes * step) - position) * 1000;
+    return delay + (timeAt(beat) - timeAt(beat - step)) * 1000;
   }
 
   ////////////////////////////////
