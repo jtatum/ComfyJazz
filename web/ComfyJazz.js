@@ -9,6 +9,7 @@ const ComfyJazz = (options = {}) => {
     autoNotesDelay: 300, //how often should we try to play notes?
     autoNotesChance: 0.2, //what % (0-1) chance is there to play an auto note?
     playAutoNotes: true, //should we automatically play notes?
+    melodyChance: undefined, //what % (0-1) of the song's melody phrases to play, if it has a melody (the song picks if not given)
     volume: 1,
   };
 
@@ -56,8 +57,10 @@ const ComfyJazz = (options = {}) => {
         }
       }
 
-      //play a note 20% of the time
-      if (cj.playAutoNotes && Math.random() < cj.autoNotesChance) {
+      scheduleMelody();
+
+      //play a note 20% of the time, unless we're in the middle of a bit of the song's melody
+      if (cj.playAutoNotes && performance.now() > melodyPlayingUntil && Math.random() < cj.autoNotesChance) {
         playNoteRandomly(0, 200);
       }
 
@@ -78,10 +81,49 @@ const ComfyJazz = (options = {}) => {
         return;
       }
       let sound = getNextNote();
-	  const instruments = cj.instrument.split( "," ).map( x => x.trim() );
-	  let instrument = instruments[ getRandomInt( instruments.length ) ];
-      await playSound(`${cj.baseUrl}/${instrument}/${sound.url}.ogg`, cj.volume, sound.playbackRate);
+      await playSound(`${cj.baseUrl}/${pickInstrument()}/${sound.url}.ogg`, cj.volume, sound.playbackRate);
     }, minRandom + Math.random() * maxRandom);
+  }
+
+  function pickInstrument() {
+    const instruments = cj.instrument.split(",").map((x) => x.trim());
+    return instruments[getRandomInt(instruments.length)];
+  }
+
+  //Every so often, play a phrase of the song's own melody right where it goes in the loop
+  const melodyDecidedLap = []; //which time round the loop we last rolled the dice for each phrase
+  let melodyPlayingUntil = 0;
+
+  function scheduleMelody() {
+    const elapsed = getElapsedTime();
+    if (!song.phrases || !cj.playAutoNotes || elapsed === null) {
+      return;
+    }
+    const duration = cj.backgroundSound.duration() || song.duration;
+    //look a couple of ticks ahead, so a late tick can't miss the start of a phrase
+    const lookahead = (2 * cj.autoNotesDelay) / 1000;
+    song.phrases.forEach((phrase, i) => {
+      const wait = mod(phrase.start - elapsed, duration);
+      const lap = Math.round((elapsed + wait - phrase.start) / duration);
+      if (wait > lookahead || melodyDecidedLap[i] === lap) {
+        return;
+      }
+      melodyDecidedLap[i] = lap;
+      if (Math.random() >= melodyChance) {
+        return;
+      }
+      const instrument = pickInstrument(); //the whole phrase on one instrument
+      for (const note of phrase.notes) {
+        setTimeout(() => {
+          if (Howler.ctx && Howler.ctx.state !== "running") {
+            return;
+          }
+          const sound = getSample(note.note);
+          playSound(`${cj.baseUrl}/${instrument}/${sound.url}.ogg`, cj.volume, sound.playbackRate);
+        }, (wait + note.start - phrase.start) * 1000);
+      }
+      melodyPlayingUntil = Math.max(melodyPlayingUntil, performance.now() + (wait + phrase.end - phrase.start) * 1000);
+    });
   }
 
   //Play a progression of notes, with random delay spacing!
@@ -131,16 +173,23 @@ const ComfyJazz = (options = {}) => {
     cj.backgroundSound = sound;
   }
 
-  //How far into the background loop are we, in seconds?
-  function getLoopPosition() {
+  //How long has the background loop been playing, in seconds? (null if it hasn't started yet)
+  function getElapsedTime() {
     const sound = cj.backgroundSound;
     if (!sound || loopStartTime === null) {
+      return null;
+    }
+    //the audio clock is what the loop actually plays on, so following it never drifts
+    return Howler.usingWebAudio ? Howler.ctx.currentTime - loopStartTime : sound.seek();
+  }
+
+  //How far into the background loop are we, in seconds?
+  function getLoopPosition() {
+    const elapsed = getElapsedTime();
+    if (elapsed === null) {
       return 0;
     }
-    const duration = sound.duration() || song.duration;
-    //the audio clock is what the loop actually plays on, so following it never drifts
-    const elapsed = Howler.usingWebAudio ? Howler.ctx.currentTime - loopStartTime : sound.seek();
-    return elapsed % duration;
+    return elapsed % (cj.backgroundSound.duration() || song.duration);
   }
 
   //One Howl per sample, reused for every note. Howler recycles each Howl's finished sounds, so this
@@ -190,22 +239,19 @@ const ComfyJazz = (options = {}) => {
       n = scaleifyNote(n, e.targetNotes);
     }
 
-    var a = n || 48,
-      s = null;
-    s = notes.filter((x) => x.metaData.startRange <= a && a <= x.metaData.endRange)[0];
-	// NOTE: OOPS THIS MIGHT BE THE WRONG SPOT FOR SHIFTSOURCE
-	// let shifted = shiftSource( s.metaData.root, s.metaData.startRange, s.metaData.endRange );
-    let c = a - s.metaData.root;
-    let playbackRate = semitonesToPlaybackRate(c);
-    // console.log("playback", c, playbackRate);
-    let playNote = s;
-    playNote.playbackRate = playbackRate;
+    let playNote = getSample(n || 48);
 
     noteCount++;
     lastNoteTime = performance.now();
     lastNoteNumber = n;
     lastRoot = e.root;
     return playNote;
+  }
+
+  //Which sample to play for a MIDI note number, and how fast to play it to land on that note
+  function getSample(note) {
+    const sample = notes.find((x) => x.metaData.startRange <= note && note <= x.metaData.endRange);
+    return { url: sample.url, playbackRate: semitonesToPlaybackRate(note - sample.metaData.root) };
   }
 
   function getNote(scale) {
@@ -277,7 +323,10 @@ const ComfyJazz = (options = {}) => {
   //and then either
   //  bpm + chords: the chord chart, with a | between bars (see chartToProgression)
   //  duration + progression: hand-tuned chords with start/end times in seconds, like comfy below
-  //and optionally an instrument, played when the URL doesn't pick one
+  //and optionally
+  //  instrument: played when the URL doesn't pick one
+  //  melody: the song's own tune, written bar by bar under the chords (see melodyToPhrases), with
+  //  melodyChance: how often (0-1) each phrase of it gets played instead of improvising
   const songs = {
     //the original ComfyJazz loop: | Gmaj7 | D | Gmaj7 | Am7 D7 | Bm7 | Em7 | Am7 | D7 | at 70bpm
     comfy: {
@@ -362,6 +411,16 @@ const ComfyJazz = (options = {}) => {
         G     | Gmaj7 | Em9   | Dm7 D7 |
         Cmaj7 | C7    | Gmaj7 | Am7 D7 |
         C     | C7    | Gmaj7 | Am7 D7 |`,
+      //Julie's theme. Every A section is the same, except the last ends on a slightly different
+      //bar (before the bridge)
+      melodyChance: 0.3,
+      melody: `
+        B4 B4 B4 B4 C5 -  D5 D5 | D5 G4 .  G4 .  .  .  .  | G4 G4 G4 G4 A4 -  B4 B4 | B4 A4 .  A4 .  .  .  .  |
+        B4 B4 B4 B4 C5 -  D5 D5 | D5 G4 .  G4 .  .  .  .  | G4 G4 G4 G4 A4 -  B4 B4 | B4 A4 .  A4 .  .  .  .  |
+        B4 B4 B4 B4 C5 -  D5 D5 | D5 G4 .  G4 .  .  .  .  | G4 G4 G4 G4 A4 -  B4 B4 | B4 A4 .  A4 .  .  .  .  |
+        B4 B4 B4 B4 C5 -  D5 D5 | D5 G4 .  G4 .  .  .  .  | G4 G4 G4 G4 A4 -  B4 B4 | B4 -  A4 A4 .  .  .  .  |
+        .  .  .  .  .  E4 G4 -  | Bb4 - .  A4 -  G4 E4 -  | D4 -  .  .  .  .  .  .  | .  .  G4 -  G4 G4 .  .  |
+        E4 -  .  .  .  .  G4 -  | Bb4 - .  A4 -  G4 .  .  | B4 B4 B4 B4 B4 C5 B4 A4 | -  -  .  .  .  .  .  .  |`,
     },
   };
 
@@ -687,6 +746,54 @@ const ComfyJazz = (options = {}) => {
     return { progression, duration: time };
   }
 
+  //Turn a melody like "B4 - D5 . | G4 G4 A4 B4" into phrases of timed notes. Like the chords, each
+  //bar is split evenly between what's in it: a note (name, then octave, so C5 is an octave above
+  //middle C), "-" to hold the note before, or "." for a rest. Empty bars are fine too. A rest of
+  //at least two beats ends a phrase.
+  function melodyToPhrases({ melody, bpm, beatsPerBar = 4 }) {
+    const barLength = (beatsPerBar * 60) / bpm;
+    const notes = [];
+    let time = 0;
+    const bars = melody.split("|");
+    if (!bars[bars.length - 1].trim()) {
+      bars.pop(); //nothing after the last bar line
+    }
+    for (const bar of bars) {
+      const steps = bar.trim().split(/\s+/).filter((step) => step);
+      for (const step of steps) {
+        const length = barLength / steps.length;
+        const last = notes[notes.length - 1];
+        if (step === "-") {
+          if (last && last.end === time) {
+            last.end += length;
+          }
+        } else if (step !== ".") {
+          const parts = /^([A-G])(b|#)?(\d)$/.exec(step);
+          if (!parts) {
+            throw new Error(`ComfyJazz: I don't know the melody note "${step}"`);
+          }
+          const note = 12 * (Number(parts[3]) + 1) + noteNames[parts[1]] + (parts[2] === "#" ? 1 : parts[2] === "b" ? -1 : 0);
+          notes.push({ note, start: time, end: time + length });
+        }
+        time += length;
+      }
+      if (!steps.length) {
+        time += barLength;
+      }
+    }
+    const phrases = [];
+    for (const note of notes) {
+      const phrase = phrases[phrases.length - 1];
+      if (phrase && note.start - phrase.end < (2 * 60) / bpm - 0.01) {
+        phrase.notes.push(note);
+        phrase.end = note.end;
+      } else {
+        phrases.push({ start: note.start, end: note.end, notes: [note] });
+      }
+    }
+    return phrases;
+  }
+
   function loadSong(name) {
     let definition = songs[name];
     if (!definition) {
@@ -694,7 +801,11 @@ const ComfyJazz = (options = {}) => {
       definition = songs[defaultOptions.song];
     }
     if (definition.chords) {
-      return { ...definition, ...chartToProgression(definition) };
+      const loaded = { ...definition, ...chartToProgression(definition) };
+      if (definition.melody) {
+        loaded.phrases = melodyToPhrases(definition);
+      }
+      return loaded;
     }
     return {
       ...definition,
@@ -706,6 +817,7 @@ const ComfyJazz = (options = {}) => {
 
   //an instrument passed in wins, then the song's own, then the default
   cj.instrument = options.instrument || song.instrument || defaultOptions.instrument;
+  const melodyChance = cj.melodyChance ?? song.melodyChance ?? 0.3;
 
   return cj;
 };
