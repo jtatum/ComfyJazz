@@ -9,6 +9,8 @@ const ComfyJazz = (options = {}) => {
     autoNotesDelay: 300, //how often should we try to play notes?
     autoNotesChance: 0.2, //what % (0-1) chance is there to play an auto note?
     playAutoNotes: true, //should we automatically play notes?
+    melodyChance: undefined, //what % (0-1) of the song's melody phrases to play, if it has a melody (the song picks if not given)
+    spice: undefined, //how much (0-1) to play around with the melody, 0 is just as written (the song picks if not given)
     volume: 1,
   };
 
@@ -36,7 +38,7 @@ const ComfyJazz = (options = {}) => {
   cj.start = () => startComfyJazz();
 
   cj.playNoteProgression = playNoteProgression;
-  cj.playNote = playNoteRandomly;
+  cj.playNote = () => playNoteProgression(1);
 
   /////////////////////
 
@@ -56,10 +58,8 @@ const ComfyJazz = (options = {}) => {
         }
       }
 
-      //play a note 20% of the time
-      if (cj.playAutoNotes && Math.random() < cj.autoNotesChance) {
-        playNoteRandomly(0, 200);
-      }
+      scheduleMelody();
+      improvise();
 
       //here's what will loop
       setTimeout(AutomaticPlayNote, cj.autoNotesDelay);
@@ -78,17 +78,301 @@ const ComfyJazz = (options = {}) => {
         return;
       }
       let sound = getNextNote();
-	  const instruments = cj.instrument.split( "," ).map( x => x.trim() );
-	  let instrument = instruments[ getRandomInt( instruments.length ) ];
-      await playSound(`${cj.baseUrl}/${instrument}/${sound.url}.ogg`, cj.volume, sound.playbackRate);
+      await playSound(`${cj.baseUrl}/${pickInstrument()}/${sound.url}.ogg`, cj.volume, sound.playbackRate);
     }, minRandom + Math.random() * maxRandom);
   }
 
-  //Play a progression of notes, with random delay spacing!
-  function playNoteProgression(numNotes) {
-    for (var i = 0; i < numNotes; i++) {
-      playNoteRandomly(100, 200 * i);
+  //The improvising plays in time with the song: each swung eighth note as it comes up gets a roll
+  //of the dice for a note (as often as autoNotesChance every autoNotesDelay works out to), and now
+  //and then a burst of a few in a row. It sits a hair behind the beat, like a relaxed player.
+  let improvDecided = -1; //the last eighth note we rolled for, counted from when the loop started
+  let improvBusyUntil = 0;
+
+  //Notes take turns, one at a time, like a single player: each one claims its spot (a
+  //performance.now() time), and a note that wants a spot that's taken waits for the next free one.
+  //So lots of notes at once (a busy chat) turn into one longer line instead of a pile-up.
+  let claimedTimes = [];
+
+  function isFree(at) {
+    return !claimedTimes.some((time) => Math.abs(time - at) < 100);
+  }
+
+  function claim(at) {
+    const now = performance.now();
+    claimedTimes = claimedTimes.filter((time) => time > now - 500);
+    claimedTimes.push(at);
+  }
+
+  function improvise() {
+    const elapsed = getElapsedTime();
+    if (!cj.playAutoNotes || !song.bpm || elapsed === null) {
+      //not playing to the beat (yet), so just now and then
+      if (cj.playAutoNotes && Math.random() < cj.autoNotesChance) {
+        playNoteRandomly(0, 200);
+      }
+      return;
     }
+    const duration = cj.backgroundSound.duration() || song.duration;
+    const lap = Math.floor(elapsed / duration);
+    const position = elapsed - lap * duration;
+    const eighthsPerLap = Math.round((duration * song.bpm) / 30);
+    const tick = cj.autoNotesDelay / 1000;
+    const noteChance = 1 - (1 - cj.autoNotesChance) ** (30 / song.bpm / tick);
+    //every eighth note between now and the next tick
+    for (let eighth = Math.ceil((position * song.bpm) / 30 - 1); melodyTime(eighth / 2) < position + 1.5 * tick; eighth++) {
+      const time = melodyTime(eighth / 2);
+      const count = lap * eighthsPerLap + eighth;
+      if (time < position || eighth >= eighthsPerLap || count <= improvDecided) {
+        continue;
+      }
+      improvDecided = count;
+      const at = performance.now() + (time - position) * 1000;
+      if (at < melodyPlayingUntil || at < improvBusyUntil) {
+        continue;
+      }
+      if (Math.random() < 0.012 * (0.5 + melodySpice)) {
+        improvBusyUntil = performance.now() + playNoteProgression(3 + getRandomInt(4));
+      } else if (Math.random() < noteChance && isFree(at)) {
+        claim(at);
+        playImprovNote(at - performance.now());
+      }
+    }
+  }
+
+  //Play a note of improvising after a delay (in ms), now and then with a grace note in front
+  function playImprovNote(delay, volume = 1) {
+    const instrument = pickInstrument();
+    volume *= accent(getLoopPosition() + delay / 1000);
+    const grace = Math.random() < 0.06 * (0.5 + melodySpice);
+    const lead = grace ? 45 : 0; //the grace note goes just before the beat, so the note itself is on it
+    setTimeout(() => {
+      if (Howler.ctx && Howler.ctx.state !== "running") {
+        return;
+      }
+      const sound = getNextNote();
+      if (grace) {
+        playMidiNote(sound.note - 1, instrument, 0.5 * volume);
+        setTimeout(() => playSound(`${cj.baseUrl}/${instrument}/${sound.url}.ogg`, cj.volume * volume, sound.playbackRate), lead);
+      } else {
+        playSound(`${cj.baseUrl}/${instrument}/${sound.url}.ogg`, cj.volume * volume, sound.playbackRate);
+      }
+    }, Math.max(0, delay - lead) + Math.random() * 25); //a hair behind the beat
+  }
+
+  //How hard to play a note at this time in the song, like a player would: the beat gets the accent
+  //(beat 1 the most), the swung offbeats are played lighter, and no two notes come out quite the same
+  function accent(time) {
+    if (!song.bpm) {
+      return 0.9 + 0.2 * Math.random();
+    }
+    const beats = (time * song.bpm) / 60 + 0.05; //a little slack for notes a hair early
+    const offbeat = beats - Math.floor(beats) > 0.3;
+    const beat = mod(Math.floor(beats), 4);
+    const level = offbeat ? 0.75 : beat === 0 ? 1 : beat === 2 ? 0.95 : 0.88;
+    return level * (0.9 + 0.2 * Math.random());
+  }
+
+  function playMidiNote(note, instrument, volume = 1) {
+    if (Howler.ctx && Howler.ctx.state !== "running") {
+      return;
+    }
+    const sound = getSample(note);
+    playSound(`${cj.baseUrl}/${instrument}/${sound.url}.ogg`, cj.volume * volume, sound.playbackRate);
+  }
+
+  function pickInstrument() {
+    const instruments = cj.instrument.split(",").map((x) => x.trim());
+    return instruments[getRandomInt(instruments.length)];
+  }
+
+  //Every so often, play a phrase of the song's own melody right where it goes in the loop
+  const melodyDecidedLap = []; //which time round the loop we last rolled the dice for each phrase
+  let melodyPlayingUntil = 0;
+
+  function scheduleMelody() {
+    const elapsed = getElapsedTime();
+    if (!song.phrases || !cj.playAutoNotes || elapsed === null) {
+      return;
+    }
+    const duration = cj.backgroundSound.duration() || song.duration;
+    //look a couple of ticks ahead, so a late tick can't miss the start of a phrase
+    const lookahead = (2 * cj.autoNotesDelay) / 1000;
+    song.phrases.forEach((phrase, i) => {
+      const start = melodyTime(phrase.start);
+      const wait = mod(start - elapsed, duration);
+      const lap = Math.round((elapsed + wait - start) / duration);
+      //decide a little early, so there's time for any notes leading into the phrase
+      if (wait > lookahead + 1.2 || melodyDecidedLap[i] === lap) {
+        return;
+      }
+      melodyDecidedLap[i] = lap;
+      if (Math.random() >= melodyChance) {
+        return;
+      }
+      const instrument = pickInstrument(); //the whole phrase on one instrument
+      const { events, end } = embellishPhrase(phrase);
+      for (const { time, note, volume: level } of events) {
+        const delay = (wait + time - start) * 1000;
+        const volume = level * accent(time) * melodyVolume;
+        if (level > 0.5) {
+          claim(performance.now() + delay); //grace notes are too quick to get in anyone's way
+        }
+        setTimeout(() => playMidiNote(note, instrument, volume), delay);
+      }
+      melodyPlayingUntil = Math.max(melodyPlayingUntil, performance.now() + (wait + end - start) * 1000);
+    });
+  }
+
+  //Melody times are in beats, written straight. This swings them and turns them into seconds.
+  function melodyTime(beats) {
+    const swing = song.swing ?? 0.5;
+    const whole = Math.floor(beats + 1e-6);
+    const part = Math.max(0, beats - whole);
+    return ((whole + (part < 0.5 ? part * 2 * swing : swing + (part - 0.5) * 2 * (1 - swing))) * 60) / song.bpm;
+  }
+
+  //The chord-scale note next to this one, going up (direction 1) or down (-1), at a time in the song
+  function scaleNeighbor(note, time, direction) {
+    const t = mod(time, song.duration);
+    const step = song.progression.find((step) => step.start <= t && t < step.end) || song.progression[0];
+    for (let distance = 1; distance <= 3; distance++) {
+      const neighbor = note + direction * distance;
+      if (step.scale[mod(neighbor - song.transpose, 12)] === 0) {
+        return neighbor;
+      }
+    }
+    return note + direction * 2;
+  }
+
+  //Play around with a phrase of the melody like a jazz player would: the first note and the one it
+  //lands on stay as written, so it's still the tune, and the rest gets pushed, decorated, skipped,
+  //filled in or walked around. Each time round it rolls how adventurous to be, usually a little.
+  //Gives back the notes to play ({ time, note, volume }, times in seconds into the song) and when
+  //the melody's done, for the improvising to pick up again.
+  function embellishPhrase(phrase) {
+    const heat = 3 * melodySpice * Math.random() ** 1.5;
+    const chance = (p) => Math.random() < Math.min(0.85, p * heat);
+    const sixteenth = 15 / song.bpm;
+    const notes = phrase.notes;
+    const octave = chance(0.08) ? 12 : 0;
+    //the whole phrase can come in an eighth late (laid back) or early
+    const shift = chance(0.12) ? (Math.random() < 0.7 ? 0.5 : -0.5) : 0;
+    //or be just the bones of it: the first note, the long ones and the landing
+    const sparse = chance(0.08);
+    //or just the start of it, and the improvising takes it from there
+    const last = notes.length > 4 && chance(0.15) ? Math.ceil(notes.length / 2) - 1 : notes.length - 1;
+    const events = [];
+    let lastBeat = -Infinity;
+    let lastTime = -Infinity;
+    let pitch = notes[0].note + octave;
+    const played = [];
+    for (let i = 0; i <= last; i++) {
+      const { note, start, end } = notes[i];
+      const middle = i > 0 && i < last;
+      if (middle && (sparse ? end - start < 1 : chance(0.15))) {
+        continue; //leave it out
+      }
+      let beat = start + shift;
+      //push a note that's on the beat an eighth early (if the note before it isn't there already)
+      if (middle && Math.abs(start - Math.round(start)) < 1e-6 && beat - 0.5 > lastBeat && chance(0.25)) {
+        beat -= 0.5;
+      }
+      const time = melodyTime(beat) + (Math.random() - 0.5) * 0.03 * melodySpice; //and play a little loose
+      pitch = note + octave;
+      //swap a note for the one next to it, mostly where the tune repeats itself
+      if (middle && chance(notes[i - 1].note === note ? 0.3 : 0.08)) {
+        pitch = scaleNeighbor(pitch, time, Math.random() < 0.5 ? 1 : -1);
+      }
+      if (time - lastTime >= 3 * sixteenth && chance(0.1)) {
+        //circle around it: the note above, a half step below, then the note
+        events.push({ time: time - 2 * sixteenth, note: scaleNeighbor(pitch, time, 1), volume: 0.6 });
+        events.push({ time: time - sixteenth, note: pitch - 1, volume: 0.6 });
+      } else if (time - lastTime >= 2 * sixteenth && chance(0.2)) {
+        //slide in from a half step below
+        events.push({ time: time - sixteenth, note: pitch - 1, volume: 0.6 });
+      } else if (time - lastTime >= 0.15 && chance(0.2)) {
+        //a grace note, crushed right up against it
+        events.push({ time: time - 0.045, note: Math.random() < 0.7 ? pitch - 1 : scaleNeighbor(pitch, time, 1), volume: 0.45 });
+      }
+      events.push({ time, note: pitch, volume: 1 });
+      played.push(pitch);
+      lastBeat = beat;
+      lastTime = time;
+      //fill out a long note with a passing note an eighth later
+      if (middle && end - start >= 1 && chance(0.2)) {
+        const passing = melodyTime(beat + 0.5);
+        events.push({ time: passing, note: scaleNeighbor(pitch, passing, Math.random() < 0.5 ? 1 : -1), volume: 0.8 });
+        lastBeat = beat + 0.5;
+        lastTime = passing;
+      }
+    }
+    let endBeat = notes[last].end + shift;
+    if (last === notes.length - 1) {
+      if (chance(0.35)) {
+        //a little run off the end, into the gap before the next phrase
+        const direction = Math.random() < 0.5 ? 1 : -1;
+        const count = 2 + getRandomInt(2);
+        for (let n = 1; n <= count; n++) {
+          const time = melodyTime(endBeat + 0.5 * n);
+          pitch = scaleNeighbor(pitch, time, direction);
+          events.push({ time, note: pitch, volume: 0.8 });
+        }
+        endBeat += 0.5 * (count + 1);
+      } else if (chance(0.15)) {
+        //or echo the end of it back, an octave away
+        const echo = played.slice(-3);
+        echo.forEach((note, n) => {
+          events.push({ time: melodyTime(endBeat + 0.5 * (n + 1)), note: note + (octave ? -12 : 12), volume: 0.7 });
+        });
+        endBeat += 0.5 * (echo.length + 1);
+      }
+    }
+    //swell a little toward the high notes, and ease off on the landing
+    const main = events.filter((event) => event.volume === 1);
+    const low = Math.min(...main.map((event) => event.note));
+    const high = Math.max(...main.map((event) => event.note));
+    for (const event of events) {
+      event.volume *= 0.85 + (0.15 * (event.note - low)) / (high - low || 1);
+    }
+    main[main.length - 1].volume *= 0.9;
+    return { events, end: melodyTime(endBeat) };
+  }
+
+  //Play a run of notes, in time with the song: swung eighth notes, or now and then quicker triplets.
+  //It waits its turn for any spots that are already taken, and drops whatever would have to wait
+  //too long. Gives back how long until it's done, in ms.
+  function playNoteProgression(numNotes) {
+    const elapsed = getElapsedTime();
+    if (!song.bpm || elapsed === null) {
+      for (var i = 0; i < numNotes; i++) {
+        playNoteRandomly(100, 200 * i);
+      }
+      return 100 + 200 * numNotes;
+    }
+    const position = mod(elapsed, cj.backgroundSound.duration() || song.duration);
+    const triplets = numNotes > 2 && Math.random() < 0.25;
+    const step = triplets ? 1 / 3 : 1 / 2;
+    const timeAt = (beat) => (triplets ? (beat * 60) / song.bpm : melodyTime(beat));
+    //start on the next eighth note (or beat, for triplets) that's still to come
+    let beat = Math.ceil(((position + 0.03) * song.bpm) / 60 / (triplets ? 1 : 0.5)) * (triplets ? 1 : 0.5);
+    while (timeAt(beat) < position + 0.03) {
+      beat += triplets ? 1 : 0.5;
+    }
+    let played = 0;
+    let delay = 0;
+    for (; played < numNotes; beat += step) {
+      delay = (timeAt(beat) - position) * 1000;
+      if (delay > 4000) {
+        break;
+      }
+      const at = performance.now() + delay;
+      if (isFree(at)) {
+        claim(at);
+        playImprovNote(delay, played === 0 ? 1 : 0.85);
+        played++;
+      }
+    }
+    return delay + (timeAt(beat) - timeAt(beat - step)) * 1000;
   }
 
   ////////////////////////////////
@@ -131,16 +415,23 @@ const ComfyJazz = (options = {}) => {
     cj.backgroundSound = sound;
   }
 
-  //How far into the background loop are we, in seconds?
-  function getLoopPosition() {
+  //How long has the background loop been playing, in seconds? (null if it hasn't started yet)
+  function getElapsedTime() {
     const sound = cj.backgroundSound;
     if (!sound || loopStartTime === null) {
+      return null;
+    }
+    //the audio clock is what the loop actually plays on, so following it never drifts
+    return Howler.usingWebAudio ? Howler.ctx.currentTime - loopStartTime : sound.seek();
+  }
+
+  //How far into the background loop are we, in seconds?
+  function getLoopPosition() {
+    const elapsed = getElapsedTime();
+    if (elapsed === null) {
       return 0;
     }
-    const duration = sound.duration() || song.duration;
-    //the audio clock is what the loop actually plays on, so following it never drifts
-    const elapsed = Howler.usingWebAudio ? Howler.ctx.currentTime - loopStartTime : sound.seek();
-    return elapsed % duration;
+    return elapsed % (cj.backgroundSound.duration() || song.duration);
   }
 
   //One Howl per sample, reused for every note. Howler recycles each Howl's finished sounds, so this
@@ -149,6 +440,7 @@ const ComfyJazz = (options = {}) => {
   const noteSounds = {};
 
   function playSound(url, volume = 1, rate = 1) {
+    volume = Math.min(1, volume);
     return new Promise((resolve, reject) => {
       if (!noteSounds[url]) {
         noteSounds[url] = new Howl({
@@ -190,22 +482,19 @@ const ComfyJazz = (options = {}) => {
       n = scaleifyNote(n, e.targetNotes);
     }
 
-    var a = n || 48,
-      s = null;
-    s = notes.filter((x) => x.metaData.startRange <= a && a <= x.metaData.endRange)[0];
-	// NOTE: OOPS THIS MIGHT BE THE WRONG SPOT FOR SHIFTSOURCE
-	// let shifted = shiftSource( s.metaData.root, s.metaData.startRange, s.metaData.endRange );
-    let c = a - s.metaData.root;
-    let playbackRate = semitonesToPlaybackRate(c);
-    // console.log("playback", c, playbackRate);
-    let playNote = s;
-    playNote.playbackRate = playbackRate;
+    let playNote = getSample(n || 48);
 
     noteCount++;
     lastNoteTime = performance.now();
     lastNoteNumber = n;
     lastRoot = e.root;
     return playNote;
+  }
+
+  //Which sample to play for a MIDI note number, and how fast to play it to land on that note
+  function getSample(note) {
+    const sample = notes.find((x) => x.metaData.startRange <= note && note <= x.metaData.endRange);
+    return { url: sample.url, playbackRate: semitonesToPlaybackRate(note - sample.metaData.root), note };
   }
 
   function getNote(scale) {
@@ -277,12 +566,22 @@ const ComfyJazz = (options = {}) => {
   //and then either
   //  bpm + chords: the chord chart, with a | between bars (see chartToProgression)
   //  duration + progression: hand-tuned chords with start/end times in seconds, like comfy below
-  //and optionally an instrument, played when the URL doesn't pick one
+  //    (plus bpm, for the improvising to play in time)
+  //and optionally
+  //  instrument: played when the URL doesn't pick one
+  //  melody: the song's own tune, written bar by bar under the chords (see melodyToPhrases), with
+  //  melodyChance: how often (0-1) each phrase of it gets played instead of improvising
+  //  swing: how much of each beat the first of a pair of eighth notes gets. 0.5 is
+  //  straight (even), 0.67 is a triplet swing, 0.75 is a dotted eighth and a sixteenth
+  //  spice: how much (0-1) to play around with the melody (see embellishPhrase), 0 is as written
+  //  melodyVolume: how loud the melody plays next to the improvising (1 is the same)
   const songs = {
     //the original ComfyJazz loop: | Gmaj7 | D | Gmaj7 | Am7 D7 | Bm7 | Em7 | Am7 | D7 | at 70bpm
     comfy: {
       loop: "jazz_loop.ogg",
       duration: 27.428,
+      bpm: 70,
+      swing: 0.67,
       transpose: -5,
       progression: [
         {
@@ -362,6 +661,19 @@ const ComfyJazz = (options = {}) => {
         G     | Gmaj7 | Em9   | Dm7 D7 |
         Cmaj7 | C7    | Gmaj7 | Am7 D7 |
         C     | C7    | Gmaj7 | Am7 D7 |`,
+      //Julie's theme. Every A section is the same, except the last ends on a slightly different
+      //bar (before the bridge)
+      melodyChance: 0.3,
+      swing: 0.67,
+      spice: 0.5,
+      melodyVolume: 0.85, //a touch under the improvising, so it blends in
+      melody: `
+        B4 B4 B4 B4 C5 -  D5 D5 | D5 G4 .  G4 .  .  .  .  | G4 G4 G4 G4 A4 -  B4 B4 | B4 A4 .  A4 .  .  .  .  |
+        B4 B4 B4 B4 C5 -  D5 D5 | D5 G4 .  G4 .  .  .  .  | G4 G4 G4 G4 A4 -  B4 B4 | B4 A4 .  A4 .  .  .  .  |
+        B4 B4 B4 B4 C5 -  D5 D5 | D5 G4 .  G4 .  .  .  .  | G4 G4 G4 G4 A4 -  B4 B4 | B4 A4 .  A4 .  .  .  .  |
+        B4 B4 B4 B4 C5 -  D5 D5 | D5 G4 .  G4 .  .  .  .  | G4 G4 G4 G4 A4 -  B4 B4 | Bb4 - A4 A4 .  .  .  .  |
+        .  .  .  .  .  E4 G4 -  | Bb4 - .  A4 -  G4 E4 -  | D4 -  .  .  .  .  .  .  | .  .  G4 -  F#4 F4 .  . |
+        E4 -  .  .  .  .  G4 -  | Bb4 - .  A4 -  G4 .  .  | B4 B4 B4 B4 B4 C5 B4 A4 | -  -  .  .  .  .  .  .  |`,
     },
   };
 
@@ -687,6 +999,55 @@ const ComfyJazz = (options = {}) => {
     return { progression, duration: time };
   }
 
+  //Turn a melody like "B4 - D5 . | G4 G4 A4 B4" into phrases of timed notes. Like the chords, each
+  //bar is split evenly between what's in it: a note (name, then octave, so C5 is an octave above
+  //middle C), "-" to hold the note before, or "." for a rest. Empty bars are fine too. A rest of
+  //at least two beats ends a phrase. Times are in beats, and the eighth notes are swung when
+  //they're played (see melodyTime).
+  function melodyToPhrases({ melody, beatsPerBar = 4 }) {
+    const barLength = beatsPerBar;
+    const notes = [];
+    let time = 0;
+    const bars = melody.split("|");
+    if (!bars[bars.length - 1].trim()) {
+      bars.pop(); //nothing after the last bar line
+    }
+    for (const bar of bars) {
+      const steps = bar.trim().split(/\s+/).filter((step) => step);
+      for (const step of steps) {
+        const length = barLength / steps.length;
+        const last = notes[notes.length - 1];
+        if (step === "-") {
+          if (last && last.end === time) {
+            last.end += length;
+          }
+        } else if (step !== ".") {
+          const parts = /^([A-G])(b|#)?(\d)$/.exec(step);
+          if (!parts) {
+            throw new Error(`ComfyJazz: I don't know the melody note "${step}"`);
+          }
+          const note = 12 * (Number(parts[3]) + 1) + noteNames[parts[1]] + (parts[2] === "#" ? 1 : parts[2] === "b" ? -1 : 0);
+          notes.push({ note, start: time, end: time + length });
+        }
+        time += length;
+      }
+      if (!steps.length) {
+        time += barLength;
+      }
+    }
+    const phrases = [];
+    for (const note of notes) {
+      const phrase = phrases[phrases.length - 1];
+      if (phrase && note.start - phrase.end < 2 - 1e-6) {
+        phrase.notes.push(note);
+        phrase.end = note.end;
+      } else {
+        phrases.push({ start: note.start, end: note.end, notes: [note] });
+      }
+    }
+    return phrases;
+  }
+
   function loadSong(name) {
     let definition = songs[name];
     if (!definition) {
@@ -694,7 +1055,11 @@ const ComfyJazz = (options = {}) => {
       definition = songs[defaultOptions.song];
     }
     if (definition.chords) {
-      return { ...definition, ...chartToProgression(definition) };
+      const loaded = { ...definition, ...chartToProgression(definition) };
+      if (definition.melody) {
+        loaded.phrases = melodyToPhrases(definition);
+      }
+      return loaded;
     }
     return {
       ...definition,
@@ -706,6 +1071,9 @@ const ComfyJazz = (options = {}) => {
 
   //an instrument passed in wins, then the song's own, then the default
   cj.instrument = options.instrument || song.instrument || defaultOptions.instrument;
+  const melodyChance = cj.melodyChance ?? song.melodyChance ?? 0.3;
+  const melodySpice = cj.spice ?? song.spice ?? 0.5;
+  const melodyVolume = song.melodyVolume ?? 1;
 
   return cj;
 };
